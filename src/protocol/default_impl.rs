@@ -1,7 +1,7 @@
 use super::*;
-use std::{borrow::Cow, rc::Rc, sync::Arc};
+use std::{any::TypeId, borrow::Cow, rc::Rc, sync::Arc};
 
-impl<M> MsgKind<M> for () {
+impl<M> MessageType<M> for () {
     type Sent = M;
     type Returned = ();
     fn create(msg: M) -> (M, ()) {
@@ -17,8 +17,8 @@ macro_rules! default_base_types {
         $ty:ty
     ),*) => {
         $(
-            impl Msg for $ty {
-                type Kind = ();
+            impl Message for $ty {
+                type Type = ();
             }
         )*
     };
@@ -36,29 +36,29 @@ macro_rules! default_tuples {
         ($($id:ident: $na:ident + $na2:ident),*),
     )*) => {
         $(
-            impl<$($id),*> MsgKind<($($id,)*)> for ($($id::Kind,)*)
+            impl<$($id),*> MessageType<($($id,)*)> for ($($id::Type,)*)
             where
-                $($id: Msg,)*
+                $($id: Message,)*
             {
                 type Sent = ($(Sent<$id>,)*);
 
                 type Returned = ($(Returned<$id>,)*);
 
                 fn create(($($na,)*): ($($id,)*)) -> (Self::Sent, Self::Returned) {
-                    $( let $na2 = <$id::Kind as MsgKind<$id>>::create($na); )*
+                    $( let $na2 = <$id::Type as MessageType<$id>>::create($na); )*
                     (($( $na2.0, )*), ($( $na2.1, )*))
                 }
 
                 fn cancel(($($na,)*): Self::Sent, ($($na2,)*): Self::Returned) -> ($($id,)*) {
-                    ($( <$id::Kind as MsgKind<$id>>::cancel($na, $na2), )*)
+                    ($( <$id::Type as MessageType<$id>>::cancel($na, $na2), )*)
                 }
             }
 
-            impl<$($id),*> Msg for ($($id,)*)
+            impl<$($id),*> Message for ($($id,)*)
             where
-                $($id: Msg,)*
+                $($id: Message,)*
             {
-                type Kind = ();
+                type Type = ();
             }
         )*
     };
@@ -135,10 +135,10 @@ macro_rules! default_wrappers {
         $(where $_:ty: $where:ident)*
     ,)*) => {
         $(
-            impl<$($lf,)? M> Msg for $wrapper
-                where M: Msg<Kind = ()> + $($where +)*
+            impl<$($lf,)? M> Message for $wrapper
+                where M: Message<Type = ()> + $($where +)*
             {
-                type Kind = ();
+                type Type = ();
             }
         )*
     };
@@ -152,3 +152,17 @@ default_wrappers!(
     Box<[M]>,
     :'a Cow<'a, M> where M: Clone,
 );
+
+impl Protocol for () {
+    fn into_box(self) -> BoxedMessage {
+        BoxedMessage::new::<()>(())
+    }
+
+    fn try_from_box(boxed: BoxedMessage) -> Result<Self, BoxedMessage> {
+        boxed.downcast::<()>()
+    }
+
+    fn accepts_msg(msg_id: &std::any::TypeId) -> bool {
+        *msg_id == TypeId::of::<()>()
+    }
+}

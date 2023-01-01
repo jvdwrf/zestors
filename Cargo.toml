@@ -10,7 +10,13 @@ futures = "^0.3"
 tokio = { version = "^1", features = ["full"] }
 thiserror = "^1"
 async-trait = "^0.1"
-tiny-actor = { version = "^0.2.1", features = ["internals"] }
+tiny-actor = { version = "^0.2.1", features = ["internals"], path = "../../tiny-actor" }
+# tiny-actor = { path = "../../ActorSystem/tiny-actor", features = ["internals"] }
 zestors-codegen = { path = "../zestors-codegen" }
+tokio-util = { version = "0.6.4", features = ["codec"] }
+serde = { version = "^1", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4"] }
+bincode = "1.3.3"
+bytes = "1.2.1"
 
 [dev-dependencies]

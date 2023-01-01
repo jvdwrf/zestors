@@ -1,5 +1,5 @@
 use crate::{
-    message::{Msg, Returned},
+    protocol::{Message, Returned},
     *,
 };
 use futures::{Future, FutureExt};
@@ -7,13 +7,13 @@ use std::pin::Pin;
 use tiny_actor::SendError;
 
 /// Future returned when sending a message to an [Address].
-pub struct SendFut<'a, M: Msg>(
+pub struct SendFut<'a, M: Message>(
     pub(crate) Pin<Box<dyn Future<Output = Result<Returned<M>, SendError<M>>> + Send + 'a>>,
 );
 
-impl<'a, M: Msg> Unpin for SendFut<'a, M> {}
+impl<'a, M: Message> Unpin for SendFut<'a, M> {}
 
-impl<'a, M: Msg> Future for SendFut<'a, M> {
+impl<'a, M: Message> Future for SendFut<'a, M> {
     type Output = Result<Returned<M>, SendError<M>>;
 
     fn poll(

@@ -1,4 +1,4 @@
-use crate::{_gen, actor_type::ActorType, message::Protocol};
+use crate::{_gen, channel::ActorType, protocol::Protocol};
 
 use crate::*;
 use futures::{stream::FusedStream, Stream, StreamExt};

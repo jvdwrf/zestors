@@ -6,8 +6,8 @@ use tokio::task::JoinHandle;
 
 use crate::{
     _gen,
-    actor_type::{ActorType, BoxChannel},
-    message::Protocol,
+    channel::{ActorType, DynChannel},
+    protocol::Protocol,
     AcceptsAll,
 };
 
@@ -99,7 +99,7 @@ where
 impl<E, D> ChildPool<E, D>
 where
     E: Send + 'static,
-    D: ActorType<Channel = dyn BoxChannel>,
+    D: ActorType<Channel = dyn DynChannel>,
 {
     _gen::unchecked_send_methods!(inner);
     _gen::transform_methods!(inner, ChildPool<E, T>);
@@ -146,13 +146,13 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Stream returned when shutting down a `ChildPool`.
-pub struct ShutdownStream<'a, E: Send + 'static, T: BoxChannel + ?Sized>(
+pub struct ShutdownStream<'a, E: Send + 'static, T: DynChannel + ?Sized>(
     tiny_actor::ShutdownStream<'a, E, T>,
 );
 
-impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Unpin for ShutdownStream<'a, E, T> {}
+impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Unpin for ShutdownStream<'a, E, T> {}
 
-impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Stream for ShutdownStream<'a, E, T> {
+impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Stream for ShutdownStream<'a, E, T> {
     type Item = Result<E, ExitError>;
 
     fn poll_next(

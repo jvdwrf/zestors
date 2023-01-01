@@ -1,5 +1,5 @@
 use crate::{
-    actor_type::{ActorType, BoxChannel},
+    channel::{ActorType, DynChannel},
     AcceptsAll, _gen,
 };
 
@@ -42,7 +42,7 @@ where
 
 impl<D> Address<D>
 where
-    D: ActorType<Channel = dyn BoxChannel>,
+    D: ActorType<Channel = dyn DynChannel>,
 {
     _gen::unchecked_send_methods!(inner);
     _gen::transform_methods!(inner, Address<T>);

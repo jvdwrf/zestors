@@ -1,4 +1,4 @@
-use crate::message::MsgKind;
+use crate::protocol::MessageType;
 use tokio::sync::oneshot;
 
 mod into_recv;
@@ -10,7 +10,7 @@ pub fn new<T>() -> (Tx<T>, Rx<T>) {
     (Tx(tx), Rx(rx))
 }
 
-impl<M, R> MsgKind<M> for Rx<R> {
+impl<M, R> MessageType<M> for Rx<R> {
     type Sent = (M, Tx<R>);
     type Returned = Rx<R>;
 
@@ -24,7 +24,7 @@ impl<M, R> MsgKind<M> for Rx<R> {
     }
 }
 
-impl<M, R> MsgKind<M> for Tx<R> {
+impl<M, R> MessageType<M> for Tx<R> {
     type Sent = (M, Rx<R>);
     type Returned = Tx<R>;
 

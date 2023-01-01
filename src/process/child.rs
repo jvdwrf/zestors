@@ -1,5 +1,5 @@
 use crate::{
-    actor_type::{ActorType, BoxChannel},
+    channel::{ActorType, DynChannel},
     AcceptsAll, _gen,
 };
 
@@ -75,7 +75,7 @@ where
 impl<E, D> Child<E, D>
 where
     E: Send + 'static,
-    D: ActorType<Channel = dyn BoxChannel>,
+    D: ActorType<Channel = dyn DynChannel>,
 {
     _gen::unchecked_send_methods!(inner);
     _gen::transform_methods!(inner, Child<E, T>);
@@ -122,11 +122,11 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Future returned when shutting down a [Child].
-pub struct ShutdownFut<'a, E: Send + 'static, T: BoxChannel + ?Sized>(
+pub struct ShutdownFut<'a, E: Send + 'static, T: DynChannel + ?Sized>(
     tiny_actor::ShutdownFut<'a, E, T>,
 );
 
-impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Future for ShutdownFut<'a, E, T> {
+impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Future for ShutdownFut<'a, E, T> {
     type Output = Result<E, ExitError>;
 
     fn poll(
@@ -137,4 +137,4 @@ impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Future for ShutdownFut<'a, E
     }
 }
 
-impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Unpin for ShutdownFut<'a, E, T> {}
+impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Unpin for ShutdownFut<'a, E, T> {}

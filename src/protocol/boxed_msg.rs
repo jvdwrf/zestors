@@ -1,22 +1,25 @@
 use super::*;
 use std::any::Any;
 
-/// A simple wrapper around a `Box<dyn Any>`.
+/// A simple wrapper around a `Box<dyn Any>` that only allows messages to be created
+/// from [Sent<M>] if `M` implements [Message].
 #[derive(Debug)]
-pub struct BoxedMsg(Box<dyn Any + Send>);
+pub struct BoxedMessage(Box<dyn Any + Send>);
 
-impl BoxedMsg {
+impl BoxedMessage {
+    /// Create a new [BoxedMessage] from [Sent<M>].
     pub fn new<M>(sends: Sent<M>) -> Self
     where
-        M: Msg,
+        M: Message,
         Sent<M>: Send + 'static,
     {
         Self(Box::new(sends))
     }
 
+    /// Downcast the [BoxedMessage] into [Sent<M>].
     pub fn downcast<M>(self) -> Result<Sent<M>, Self>
     where
-        M: Msg,
+        M: Message,
         Sent<M>: 'static,
     {
         match self.0.downcast() {
@@ -25,13 +28,13 @@ impl BoxedMsg {
         }
     }
 
-    pub fn downcast_cancel<M>(self, returns: Returned<M>) -> Result<M, Self>
+    pub(crate) fn downcast_cancel<M>(self, returned: Returned<M>) -> Result<M, Self>
     where
-        M: Msg,
+        M: Message,
         Sent<M>: 'static,
     {
         match self.downcast::<M>() {
-            Ok(sends) => Ok(<M::Kind as MsgKind<M>>::cancel(sends, returns)),
+            Ok(sends) => Ok(<M::Type as MessageType<M>>::cancel(sends, returned)),
             Err(boxed) => Err(boxed),
         }
     }
@@ -46,18 +49,18 @@ mod test {
         struct Msg1;
         struct Msg2;
 
-        impl Msg for Msg1 {
-            type Kind = ();
+        impl Message for Msg1 {
+            type Type = ();
         }
 
-        impl Msg for Msg2 {
-            type Kind = ();
+        impl Message for Msg2 {
+            type Type = ();
         }
 
-        let boxed = BoxedMsg::new::<Msg1>(Msg1);
+        let boxed = BoxedMessage::new::<Msg1>(Msg1);
         assert!(boxed.downcast::<Msg1>().is_ok());
 
-        let boxed = BoxedMsg::new::<Msg1>(Msg1);
+        let boxed = BoxedMessage::new::<Msg1>(Msg1);
         assert!(boxed.downcast::<Msg2>().is_err());
     }
 }

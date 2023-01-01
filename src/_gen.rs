@@ -4,39 +4,39 @@ macro_rules! send_methods {
         /// returned this method will fail.
         pub fn try_send<M>(&self, msg: M) -> Result<Returned<M>, tiny_actor::TrySendError<M>>
         where
-            M: Msg,
-            T: CanSend<M>,
+            M: Message,
+            T: Accepts<M>,
         {
-            <T as CanSend<M>>::try_send(&self.$at.channel_ref(), msg)
+            <T as Accepts<M>>::try_send(&self.$at.channel_ref(), msg)
         }
 
         /// Attempts to send a message to an actor. If the mailbox is full this will fail, but if
         /// a timeout is returned then this will succeed.
         pub fn send_now<M>(&self, msg: M) -> Result<Returned<M>, tiny_actor::TrySendError<M>>
         where
-            M: Msg,
-            T: CanSend<M>,
+            M: Message,
+            T: Accepts<M>,
         {
-            <T as CanSend<M>>::send_now(&self.$at.channel_ref(), msg)
+            <T as Accepts<M>>::send_now(&self.$at.channel_ref(), msg)
         }
 
         /// Same as `send`, but blocks the thread instead.
         pub fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, tiny_actor::SendError<M>>
         where
-            M: Msg,
-            T: CanSend<M>,
+            M: Message,
+            T: Accepts<M>,
         {
-            <T as CanSend<M>>::send_blocking(&self.$at.channel_ref(), msg)
+            <T as Accepts<M>>::send_blocking(&self.$at.channel_ref(), msg)
         }
 
         /// Send a message to the actor. If the inbox is full or returns a timeout, wait for this
         /// and then send it.
         pub fn send<M>(&self, msg: M) -> SendFut<M>
         where
-            M: Msg,
-            T: CanSend<M>,
+            M: Message,
+            T: Accepts<M>,
         {
-            <T as CanSend<M>>::send(&self.$at.channel_ref(), msg)
+            <T as Accepts<M>>::send(&self.$at.channel_ref(), msg)
         }
     };
 }
@@ -50,7 +50,7 @@ macro_rules! unchecked_send_methods {
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
         pub fn try_send_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
         where
-            M: Msg + Send + 'static,
+            M: Message + Send + 'static,
             Sent<M>: Send + 'static,
         {
             self.$at.channel_ref().try_send_unchecked(msg)
@@ -61,7 +61,7 @@ macro_rules! unchecked_send_methods {
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
         pub fn send_now_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
         where
-            M: Msg + Send + 'static,
+            M: Message + Send + 'static,
             Sent<M>: Send + 'static,
         {
             self.$at.channel_ref().send_now_unchecked(msg)
@@ -75,7 +75,7 @@ macro_rules! unchecked_send_methods {
             msg: M,
         ) -> Result<Returned<M>, SendUncheckedError<M>>
         where
-            M: Msg + Send + 'static,
+            M: Message + Send + 'static,
             Sent<M>: Send + 'static,
         {
             self.$at.channel_ref().send_blocking_unchecked(msg)
@@ -86,7 +86,7 @@ macro_rules! unchecked_send_methods {
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
         pub async fn send_unchecked<M>(&self, msg: M) -> Result<Returned<M>, SendUncheckedError<M>>
         where
-            M: Msg + Send + 'static,
+            M: Message + Send + 'static,
             Sent<M>: Send + 'static,
         {
             self.$at.channel_ref().send_unchecked(msg).await
@@ -102,7 +102,7 @@ macro_rules! transform_methods {
         /// In most cases it is recomended to use `transform` and `try_transform` instead.
         pub fn transform_unchecked<T>(self) -> $ty
         where
-            T: ActorType<Channel = dyn BoxChannel>,
+            T: ActorType<Channel = dyn DynChannel>,
         {
             <$ty>::from_inner(self.$at)
         }
@@ -111,8 +111,8 @@ macro_rules! transform_methods {
         /// time if the actor accepts all messages.
         pub fn transform<T>(self) -> $ty
         where
-            D: AcceptsDyn<T>,
-            T: ActorType<Channel = dyn BoxChannel>,
+            D: IntoDyn<T>,
+            T: ActorType<Channel = dyn DynChannel>,
         {
             self.transform_unchecked()
         }
@@ -123,8 +123,8 @@ macro_rules! transform_methods {
         /// Wherever possible use `transform` instead.
         pub fn try_transform<T>(self) -> Result<$ty, Self>
         where
-            T: DynProtocol,
-            T: ActorType<Channel = dyn BoxChannel>,
+            T: IsDyn,
+            T: ActorType<Channel = dyn DynChannel>,
         {
             if T::msg_ids().iter().all(|id| self.accepts(id)) {
                 Ok(self.transform_unchecked())
@@ -156,8 +156,8 @@ macro_rules! into_dyn_methods {
         /// Convert the static actor into a dynamic one, checked at compile-time.
         pub fn into_dyn<T>(self) -> $ty
         where
-            P: Protocol + AcceptsDyn<T>,
-            T: ActorType<Channel = dyn BoxChannel>,
+            P: Protocol + IntoDyn<T>,
+            T: ActorType<Channel = dyn DynChannel>,
         {
             <$ty>::from_inner(self.$at.transform_channel(|c| c))
         }

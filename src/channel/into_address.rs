@@ -1,9 +1,4 @@
-use crate::{
-    message::{AcceptsDyn, Dyn},
-    process::Address,
-};
-
-use super::*;
+use crate::*;
 
 pub trait IntoAddress<T: ActorType> {
     fn into_address(self) -> Address<T>;
@@ -11,7 +6,7 @@ pub trait IntoAddress<T: ActorType> {
 
 impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Address<Dyn<R>>
 where
-    Dyn<R>: ActorType<Channel = dyn BoxChannel> + AcceptsDyn<Dyn<T>>,
+    Dyn<R>: IntoDyn<Dyn<T>>,
 {
     fn into_address(self) -> Address<Dyn<T>> {
         self.transform()
@@ -20,7 +15,7 @@ where
 
 impl<P, T> IntoAddress<Dyn<T>> for Address<P>
 where
-    P: Protocol + AcceptsDyn<Dyn<T>>,
+    P: Protocol + IntoDyn<Dyn<T>>,
     T: ?Sized,
 {
     fn into_address(self) -> Address<Dyn<T>> {
