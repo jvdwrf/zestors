@@ -1,41 +1,42 @@
-pub mod specification;
-pub mod supervised;
+mod specification;
+mod supervised;
+mod supervisor;
 
-use std::{marker::PhantomData, time::Duration};
+use crate::process::Child;
+use std::time::Duration;
+use tiny_actor::Link;
 
 pub use specification::*;
 pub use supervised::*;
-use tiny_actor::Link;
+pub use supervisor::*;
 
-use crate::process::Child;
-
-async fn example_fn_v2(
-    init: SpawnAction<u32, bool>,
+async fn example_spawn_fn(
+    init: StartOption<bool>,
     link: Link,
-) -> AnyResult<Option<Child<bool, ()>>> {
+) -> Result<Option<Child<bool, ()>>, StartError> {
     match init {
-        SpawnAction::Spawn(u32) => todo!(),
-        SpawnAction::Respawn(Ok(bool)) => todo!(),
-        SpawnAction::Respawn(Err(e)) => todo!(),
+        StartOption::Start => todo!(),
+        StartOption::Restart(Ok(bool)) => todo!(),
+        StartOption::Restart(Err(e)) => todo!(),
     }
 }
 
 async fn example_v2() {
-    let spec = ChildSpec::new(example_fn_v2, 0, Duration::from_secs(1));
-    let mut child = spec.spawn().await.unwrap();
+    let spec = ChildSpec::new(example_spawn_fn, Link::Attached(Duration::from_secs(1)));
+    let mut child = spec.start().await.unwrap();
     child.supervise().await;
-    match child.respawn().await {
+    match child.restart().await {
         Ok(supervision) => match supervision {
             Supervision::Restarted => println!("Child restarted successfully"),
             Supervision::Finished => println!("Child finished successfully"),
         },
-        Err(e) => println!("Restarting has failed"),
+        Err(e) => println!("Restarting has failed: {:?}", e),
     }
 
-    let spec = ChildSpec::new(example_fn_v2, 0, Duration::from_secs(1)).into_dyn();
-    let mut child = spec.spawn().await.unwrap();
+    let spec = ChildSpec::new(example_spawn_fn, Link::Attached(Duration::from_secs(1))).into_dyn();
+    let mut child = spec.start().await.unwrap();
     child.supervise().await;
-    match child.respawn().await {
+    match child.restart().await {
         Ok(supervision) => match supervision {
             Supervision::Restarted => println!("Child restarted successfully"),
             Supervision::Finished => println!("Child finished successfully"),

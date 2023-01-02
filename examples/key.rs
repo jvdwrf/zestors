@@ -19,8 +19,9 @@
 //     B = 4,
 // }
 
-fn main() {}
+// use zestors::supervision_v2::DynamicChildSpec;
 
+fn main() {}
 
 // // Generates this impl
 // impl From<MyKey> for Key {

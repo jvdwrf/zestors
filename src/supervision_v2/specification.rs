@@ -1,50 +1,56 @@
-use super::*;
-use crate::{self as zestors, *};
+use crate::*;
 use async_trait::async_trait;
-use futures::{future::BoxFuture, Future};
-use std::{error::Error, marker::PhantomData, process::Output, time::Duration};
-use tiny_actor::{Capacity, Link};
+use futures::Future;
+use std::marker::PhantomData;
+use tiny_actor::Link;
 
-pub(super) type AnyResult<T> = Result<T, Box<dyn Error + Send>>;
+pub(super) type RestartResult<T> = Result<T, StartError>;
 
-/// A child-specification defines exactly how a child may be spawned and subsequently
-/// restarted. The child-specification can be added to a supervisor in order to automatically
-/// spawn and supervise the process.
-pub struct ChildSpec<P, E, I, SpawnFn, SpawnFut> {
-    spawn_fn: SpawnFn,
-    init: I,
-    link: Link,
-    phantom_data: PhantomData<(SpawnFut, P, E)>,
-}
-
-impl<P, E, I, SpawnFn, SpawnFut> Clone for ChildSpec<P, E, I, SpawnFn, SpawnFut>
-where
-    I: Clone,
-    SpawnFn: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            spawn_fn: self.spawn_fn.clone(),
-            init: self.init.clone(),
-            link: self.link.clone(),
-            phantom_data: self.phantom_data.clone(),
-        }
-    }
-}
-
-impl<P, E, I, SpawnFn, SpawnFut> ChildSpec<P, E, I, SpawnFn, SpawnFut>
+impl<P, E, Fun, Fut> From<ChildSpec<P, E, Fun, Fut>> for DynamicChildSpec
 where
     P: Protocol + Send,
     E: Send + 'static,
-    I: Send + 'static,
-    SpawnFn: Fn(SpawnAction<I, E>, Link) -> SpawnFut + Send + 'static,
-    SpawnFut: Future<Output = AnyResult<Option<Child<E, P>>>> + Send + 'static,
+    Fun: FnMut(StartOption<E>, Link) -> Fut + Send + 'static,
+    Fut: Future<Output = RestartResult<Option<Child<E, P>>>> + Send + 'static,
 {
-    pub fn new(spawn_fn: SpawnFn, init: I, duration: Duration) -> Self {
+    fn from(val: ChildSpec<P, E, Fun, Fut>) -> Self {
+        val.into_dyn()
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  ChildSpec
+//------------------------------------------------------------------------------------------------
+
+/// A `ChildSpec` (read child-specification) defines exactly how a child may be spawned and subsequently
+/// restarted. The child-specification can be added to a supervisor in order to automatically
+/// spawn and supervise the process.
+///
+/// A new `ChildSpec` may be created using the [ChildSpec::new] function for complete control
+/// over its restart behaviour. In most cases however, a `ChildSpec` can be created from a bunch
+/// of different types like ...
+///
+/// A `ChildSpec<P, E, Fun, Fut>` can be converted into a [DynamicChildSpec] using
+/// [ChildSpec::into_dyn]. This removes its type-information, but it can still be spawned and
+/// supervised.
+#[derive(Debug)]
+pub struct ChildSpec<P, E, Fun, Fut> {
+    start_fn: Fun,
+    link: Link,
+    phantom_data: PhantomData<(Fut, P, E)>,
+}
+
+impl<P, E, Fun, Fut> ChildSpec<P, E, Fun, Fut>
+where
+    P: Protocol + Send,
+    E: Send + 'static,
+    Fun: FnMut(StartOption<E>, Link) -> Fut + Send + 'static,
+    Fut: Future<Output = RestartResult<Option<Child<E, P>>>> + Send + 'static,
+{
+    pub fn new(start_fn: Fun, link: Link) -> Self {
         Self {
-            spawn_fn,
-            init,
-            link: Link::Attached(duration),
+            start_fn,
+            link,
             phantom_data: PhantomData,
         }
     }
@@ -53,44 +59,66 @@ where
         DynamicChildSpec(Box::new(self))
     }
 
-    pub async fn spawn(self) -> AnyResult<SupervisedChild<P, E, I, SpawnFn, SpawnFut>> {
-        let spawn_fut = (self.spawn_fn)(SpawnAction::Spawn(self.init), self.link);
+    pub async fn start(mut self) -> RestartResult<SupervisedChild<P, E, Fun, Fut>> {
+        let spawn_fut = (self.start_fn)(StartOption::Start, self.link);
 
         match spawn_fut.await {
-            Ok(Some(child)) => Ok(SupervisedChild::new(child, self.spawn_fn)),
+            Ok(Some(child)) => Ok(SupervisedChild::new(child, self.start_fn)),
             Ok(None) => panic!("May not return None when spawning for the first time"),
             Err(e) => Err(e),
         }
     }
 }
 
-pub struct DynamicChildSpec(Box<dyn SpecifiesChild + Send>);
-
-impl DynamicChildSpec {
-    pub async fn spawn(self) -> AnyResult<DynamicSupervisedChild> {
-        Ok(DynamicSupervisedChild(self.0.spawn_boxed().await?))
+impl<P, E, Fun, Fut> Clone for ChildSpec<P, E, Fun, Fut>
+where
+    Fun: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            start_fn: self.start_fn.clone(),
+            link: self.link.clone(),
+            phantom_data: self.phantom_data.clone(),
+        }
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  DynamicChildSpec
+//------------------------------------------------------------------------------------------------
+
+/// A [ChildSpec] with its type erased.
+/// This can be created using [ChildSpec::into_dyn].
+pub struct DynamicChildSpec(Box<dyn Specifies + Send>);
+
+impl DynamicChildSpec {
+    pub async fn start(self) -> RestartResult<DynamicSupervisedChild> {
+        self.0.box_start().await
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  Specifies
+//------------------------------------------------------------------------------------------------
+
+/// A private trait used internally to create the DynamicChildSPec.
 #[async_trait]
-pub(super) trait SpecifiesChild {
-    /// Spawn the supervi
-    async fn spawn_boxed(self: Box<Self>) -> AnyResult<Box<dyn Supervisable + Send>>;
+trait Specifies {
+    async fn box_start(self: Box<Self>) -> RestartResult<DynamicSupervisedChild>;
     fn link(&self) -> &Link;
     fn link_mut(&mut self) -> &mut Link;
 }
 
 #[async_trait]
-impl<P, E, I, SpawnFn, SpawnFut> SpecifiesChild for ChildSpec<P, E, I, SpawnFn, SpawnFut>
+impl<P, E, Fun, Fut> Specifies for ChildSpec<P, E, Fun, Fut>
 where
     P: Protocol + Send,
     E: Send + 'static,
-    I: Send + 'static,
-    SpawnFn: Fn(SpawnAction<I, E>, Link) -> SpawnFut + Send + 'static,
-    SpawnFut: Future<Output = AnyResult<Option<Child<E, P>>>> + Send + 'static,
+    Fun: FnMut(StartOption<E>, Link) -> Fut + Send + 'static,
+    Fut: Future<Output = RestartResult<Option<Child<E, P>>>> + Send + 'static,
 {
-    async fn spawn_boxed(self: Box<Self>) -> AnyResult<Box<dyn Supervisable + Send>> {
-        Ok(Box::new(self.spawn().await?))
+    async fn box_start(mut self: Box<Self>) -> RestartResult<DynamicSupervisedChild> {
+        Ok(DynamicSupervisedChild::new(self.start().await?))
     }
 
     fn link(&self) -> &Link {
@@ -102,7 +130,11 @@ where
     }
 }
 
-pub enum SpawnAction<I, E> {
-    Spawn(I),
-    Respawn(Result<E, ExitError>),
+//------------------------------------------------------------------------------------------------
+//  SpawnAction
+//------------------------------------------------------------------------------------------------
+
+pub enum StartOption<E> {
+    Start,
+    Restart(Result<E, ExitError>),
 }

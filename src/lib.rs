@@ -10,12 +10,12 @@ pub mod request;
 
 pub(crate) mod _gen;
 pub mod distributed;
-pub mod supervision;
-pub mod supervision_v2;
+// mod supervision_v2;
+pub mod supervision_v3;
 
 pub(crate) use {
     channel::*, config::*, distributed::*, error::*, process::*, protocol::*, request::*,
-    supervision::*,
+    supervision_v3::*,
 };
 
 pub use zestors_codegen::{protocol, Message};
