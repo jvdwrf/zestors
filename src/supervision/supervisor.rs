@@ -1,136 +1,144 @@
-use crate::{self as zestors, *};
-use futures::{future, Future, FutureExt};
+use crate::*;
+use futures::{future::BoxFuture, pin_mut, Future, FutureExt, Stream, StreamExt};
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
-type BoxedChildSpec = Box<dyn FnOnce() -> Box<dyn Supervisable + Send> + Send>;
-
-pub struct SupervisorRef {
-    address: Address<()>,
-}
+//------------------------------------------------------------------------------------------------
+//  SupervisorBuilder
+//------------------------------------------------------------------------------------------------
 
 pub struct SupervisorBuilder {
-    children: Vec<BoxedChildSpec>,
-    strategy: SupervisionStrategy,
-}
-
-pub enum SupervisionStrategy {
-    /// If a child terminates, only that child is restarted
-    OneForOne { max: u32, within: Duration },
-    /// If a child terminates, that process and all those started after it
-    /// are restarted.
-    RestForOne { max: u32, within: Duration },
-    /// If a child terminates, all other child processes are terminated
-    /// and then all processes are restarted.
-    OneForAll { max: u32, within: Duration },
-}
-
-/// When to restart the child
-pub enum RestartStrategy {
-    NormalOnly,
-    PanicOrNormal,
-    HaltOrNormal,
-    PanicOrHalt,
-    Always,
-}
-
-impl Default for RestartStrategy {
-    fn default() -> Self {
-        Self::NormalOnly
-    }
-}
-
-pub enum ShutdownStrategy {
-    Abort,
-    HaltThenAbort(Duration),
-    Halt,
+    child_specs: Vec<DynamicChildSpec>,
 }
 
 impl SupervisorBuilder {
-    pub fn new(
-        strategy: SupervisionStrategy,
-        shutdown: ShutdownStrategy,
-        restart: RestartStrategy,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            children: Vec::new(),
-            strategy,
+            child_specs: Vec::new(),
         }
     }
 
-    pub fn add_child<S>(mut self, spec: S) -> Self
-    where
-        S: SpecifiesChild + Send + 'static,
-    {
-        self.children.push(Box::new(move || spec.spawn()));
+    pub fn add_spec<S: SpecifiesChild<S>>(mut self, spec: S) -> Self {
+        self.child_specs.push(DynamicChildSpec::new(spec));
         self
     }
 
-    pub fn spawn(self) -> (Child<()>, SupervisorRef) {
-        let (child, address) = spawn_process(Config::default(), |inbox: Inbox<()>| async move {
-            Supervisor {
-                children: self.children.into_iter().map(|child| child()).collect(),
-                inbox,
-            }
-            .await
-        });
-        (child.into_dyn(), SupervisorRef { address })
+    pub async fn start(self) -> Result<(), StartError> {
+        let mut children = Vec::with_capacity(self.child_specs.len());
+
+        for spec in self.child_specs {
+            let child = spec.start().await?;
+            children.push(child);
+        }
+
+        Ok(())
     }
 }
 
-impl SpecifiesChild for SupervisorBuilder {
-    fn spawn(self) -> Box<dyn Supervisable + Send> {
-        let spec = ChildSpec {
-            run_fn: |inbox: Inbox<()>, i: ()| async move {},
-            init: (),
-            restart_fn: |exit: Result<(), ExitError>| Some(async move { Ok(()) }),
-            config: Config::default(),
-        };
-
-        <ChildSpec<_, _, _, _, _> as SpecifiesChild>::spawn(spec)
-    }
-}
+//------------------------------------------------------------------------------------------------
+//  Supervisor
+//------------------------------------------------------------------------------------------------
 
 struct Supervisor {
-    children: Vec<Box<dyn Supervisable + Send>>,
-    inbox: Inbox<()>,
+    supervisees: Vec<DynamicSupervisee>,
+    inbox: Inbox<SupervisorProtocol>,
+}
+
+impl Supervisor {
+    async fn start(
+        child_specs: Vec<DynamicChildSpec>,
+    ) -> Result<(Child<SupervisorExit>, SupervisorRef), StartError> {
+        let mut supervisees = Vec::new();
+        for spec in child_specs {
+            supervisees.push(spec.start().await?);
+        }
+
+        let (child, address) = spawn_process(Config::default(), move |inbox| async move {
+            Self { supervisees, inbox }.await
+        });
+
+        Ok((child.into_dyn(), SupervisorRef { address }))
+    }
+}
+
+impl StartableWith<Vec<DynamicChildSpec>> for Supervisor {
+    type Output = (Child<SupervisorExit>, SupervisorRef);
+    type Fut = BoxStartFut<Self::Output>;
+
+    fn start_with(with: Vec<DynamicChildSpec>) -> Self::Fut {
+        Box::pin(Self::start(with))
+    }
 }
 
 impl Unpin for Supervisor {}
 
 impl Future for Supervisor {
-    type Output = ();
+    type Output = SupervisorExit;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.children.len() == 0 {
-            return Poll::Ready(());
+        fn poll_until_ok(
+            supervisee: &mut DynamicSupervisee,
+            cx: &mut Context<'_>,
+        ) -> Result<bool, StartError> {
+            loop {
+                match supervisee.next().poll_unpin(cx) {
+                    // Wants to be restarted, so we have to poll it again
+                    Poll::Ready(Some(Ok(()))) => {}
+                    // Error, exit now
+                    Poll::Ready(Some(Err(error))) => break Err(error),
+                    // Is finished, can be removed
+                    Poll::Ready(None) => break Ok(true),
+                    // Pending, ok
+                    Poll::Pending => break Ok(false),
+                }
+            }
         }
 
-        // let mut failed_restarts = Vec::new();
+        if self.supervisees.len() == 0 {
+            return Poll::Ready(Ok(()));
+        }
 
-        // for (i, child) in self.children.iter_mut().enumerate() {
-        //     match child.state() {
-        //         ChildState::Alive => {
-        //             let exit = child.supervise().poll_unpin(cx);
-        //             if let Poll::Ready(exit) = exit {
-        //                 if let Poll::Ready(false) = child.restart(exit).poll_unpin(cx) {
-        //                     failed_restarts.push(i)
-        //                 }
-        //             };
-        //         }
-        //         ChildState::Restarting => {
-        //             if let Poll::Ready(false) = child.continue_restart().poll_unpin(cx) {
-        //                 failed_restarts.push(i)
-        //             }
-        //         }
-        //         ChildState::Exited => todo!(),
-        //         ChildState::Finished => todo!(),
-        //     }
-        // }
+        let mut to_remove = Vec::new();
 
-        Poll::Pending
+        let result = self
+            .supervisees
+            .iter_mut()
+            .enumerate()
+            .find_map(|(i, supervisee)| {
+                match poll_until_ok(supervisee, cx) {
+                    // is finished
+                    Ok(true) => {
+                        to_remove.push(i);
+                        None
+                    }
+                    // Not finished yet, pending
+                    Ok(false) => None,
+                    // Failed to restart, supervisor will now exit
+                    Err(e) => {
+                        to_remove.push(i);
+                        Some(e)
+                    }
+                }
+            });
+
+        for i in to_remove.into_iter().rev() {
+            self.supervisees.swap_remove(i);
+        }
+
+        match result {
+            Some(e) => Poll::Ready(Err(SupervisorError::ChildFailedToStart(e))),
+            None => Poll::Pending,
+        }
     }
 }
+
+struct SupervisorRef {
+    address: Address<SupervisorProtocol>,
+}
+type SupervisorExit = Result<(), SupervisorError>;
+enum SupervisorError {
+    ChildFailedToStart(StartError),
+}
+type SupervisorProtocol = ();
